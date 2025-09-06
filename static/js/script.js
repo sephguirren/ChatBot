@@ -1,30 +1,32 @@
 async function sendMessage() {
-    const userMessage = document.getElementById("userInput").value;
+  let input = document.getElementById("input");
+  let message = input.value.trim();
+  if (!message) return;
 
-    if (!userMessage.trim()) return;
+  let chatbox = document.getElementById("chatbox");
 
-    // Show user message in chatbox
-    document.getElementById("chatbox").innerHTML += `<p><b>You:</b> ${userMessage}</p>`;
-    document.getElementById("userInput").value = "";
+  // User message
+  let userDiv = document.createElement("div");
+  userDiv.className = "user-message";
+  userDiv.innerText = message;
+  chatbox.appendChild(userDiv);
 
-    try {
-        const response = await fetch("/get", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ message: userMessage })
-        });
+  input.value = "";
+  chatbox.scrollTop = chatbox.scrollHeight;
 
-        const data = await response.json();
+  // Send to Flask backend
+  let res = await fetch("/get", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message })
+  });
+  let data = await res.json();
 
-        if (data.reply) {
-            document.getElementById("chatbox").innerHTML += `<p><b>Bot:</b> ${data.reply}</p>`;
-        } else {
-            document.getElementById("chatbox").innerHTML += `<p><b>Bot:</b> (error: no reply)</p>`;
-        }
-    } catch (err) {
-        document.getElementById("chatbox").innerHTML += `<p><b>Bot:</b> (server error)</p>`;
-        console.error("Error:", err);
-    }
+  // Bot reply
+  let botDiv = document.createElement("div");
+  botDiv.className = "bot-message";
+  botDiv.innerText = data.reply;
+  chatbox.appendChild(botDiv);
+
+  chatbox.scrollTop = chatbox.scrollHeight;
 }
