@@ -1,180 +1,260 @@
-from flask import Flask, request, jsonify, render_template
-import json
-import random
 import os
+from functools import wraps
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+import random
+import json
 import pickle
-from datetime import datetime
-import re
 import mysql.connector
+from datetime import datetime
 
+# -------------------------
+# Configuration
+# -------------------------
 app = Flask(__name__)
 
-# --- Load intents.json ---
+# Use environment secret if available, otherwise fallback (change before sharing)
+app.secret_key = os.environ.get("CHATBOT_SECRET_KEY", "please_change_this_secret")
+
+# Admin credentials from environment (safer). Defaults are for local dev only.
+ADMIN_USERNAME = os.environ.get("CHATBOT_ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.environ.get("CHATBOT_ADMIN_PASS", "password123")
+
+# -------------------------
+# Load model & intents
+# -------------------------
 with open("intents.json", encoding="utf-8") as f:
     intents = json.load(f)
 
-# --- Load ML model if available ---
-model, vectorizer = None, None
+# load model & vectorizer if present (optional)
+model = None
+vectorizer = None
 if os.path.exists("chatbot_model.pkl") and os.path.exists("vectorizer.pkl"):
-    with open("chatbot_model.pkl", "rb") as f:
-        model = pickle.load(f)
-    with open("vectorizer.pkl", "rb") as f:
-        vectorizer = pickle.load(f)
-    print("[INFO] Model and vectorizer loaded successfully", flush=True)
+    with open("chatbot_model.pkl", "rb") as mf:
+        model = pickle.load(mf)
+    with open("vectorizer.pkl", "rb") as vf:
+        vectorizer = pickle.load(vf)
+    print("[INFO] Model and vectorizer loaded", flush=True)
 else:
-    print("[WARNING] Model/vectorizer not found. Running in keyword mode.", flush=True)
+    print("[WARNING] No model/vectorizer found; running in keyword mode", flush=True)
 
-
-# ===============================
-# 📌 DATABASE CONNECTION
-# ===============================
-def get_connection():
+# -------------------------
+# DB (MySQL) connection
+# -------------------------
+def get_db_connection():
     return mysql.connector.connect(
-        host="localhost",
-        user="root",          # default XAMPP user
-        password="",          # leave empty unless you set one
-        database="chatbot_db" # the DB you created
+        host=os.environ.get("CHATBOT_DB_HOST", "localhost"),
+        user=os.environ.get("CHATBOT_DB_USER", "root"),
+        password=os.environ.get("CHATBOT_DB_PASS", ""),
+        database=os.environ.get("CHATBOT_DB_NAME", "chatbot_db")
     )
 
-
-def log_conversation(user_msg, bot_reply):
-    """Save user and bot messages to DB"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO conversations (user_message, bot_reply) VALUES (%s, %s)",
-        (user_msg, bot_reply)
+# Create tables if not exist (safe on each run)
+def ensure_tables():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS chat_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_message TEXT,
+        bot_response TEXT,
+        timestamp DATETIME
     )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS knowledge (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        question TEXT UNIQUE,
+        answer TEXT
+    )
+    """)
     conn.commit()
+    cur.close()
     conn.close()
 
+ensure_tables()
+
+# -------------------------
+# Auth decorator
+# -------------------------
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("admin"):
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated
+
+# -------------------------
+# Helper DB functions
+# -------------------------
+def log_chat(user_msg, bot_resp):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO chat_logs (user_message, bot_response, timestamp) VALUES (%s, %s, %s)",
+                (user_msg, bot_resp, datetime.now()))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def search_knowledge_exact(user_msg):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT answer FROM knowledge WHERE question = %s", (user_msg,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row[0] if row else None
 
 def save_knowledge(question, answer):
-    """Save new learned Q&A into DB"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO knowledge (question, answer) VALUES (%s, %s)",
-        (question, answer)
-    )
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO knowledge (question, answer) VALUES (%s, %s)", (question, answer))
     conn.commit()
+    cur.close()
     conn.close()
 
-
-def search_knowledge(user_msg):
-    """Search knowledge base for exact match"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT answer FROM knowledge WHERE question = %s", (user_msg,))
-    row = cursor.fetchone()
+def fetch_recent_chats(limit=50):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, user_message, bot_response, timestamp FROM chat_logs ORDER BY timestamp DESC LIMIT %s", (limit,))
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
-    if row:
-        return row[0]
+    return rows
+
+def fetch_knowledge():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, question, answer FROM knowledge ORDER BY id DESC")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+def delete_knowledge_entry(k_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM knowledge WHERE id=%s", (k_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# -------------------------
+# Chat logic
+# -------------------------
+def extract_name(text):
+    import re
+    patterns = [r"my name is (\w+)", r"i am (\w+)", r"i'm (\w+)", r"call me (\w+)"]
+    for p in patterns:
+        m = re.search(p, text.lower())
+        if m:
+            return m.group(1).capitalize()
     return None
 
-
-# ===============================
-# 📌 CHATBOT LOGIC
-# ===============================
 def chatbot_response(user_msg):
-    user_msg_lower = user_msg.lower()
-
-    # --- check learned knowledge first ---
-    learned = search_knowledge(user_msg)
+    # 1) check DB knowledge (exact)
+    learned = search_knowledge_exact(user_msg)
     if learned:
+        log_chat(user_msg, learned)
         return learned
 
-    # --- allow teaching new Q&A ---
-    if user_msg_lower.startswith("teach:"):
+    # 2) teach mode
+    if user_msg.lower().strip().startswith("teach:"):
         try:
-            # format: teach: What is AI?=AI means Artificial Intelligence.
             content = user_msg[6:].strip()
             question, answer = content.split("=", 1)
             save_knowledge(question.strip(), answer.strip())
-            return f"✅ Got it! I’ve learned how to answer: '{question.strip()}'"
-        except:
-            return "⚠️ Oops! Use this format: teach: question=answer"
+            resp = f"✅ Got it! I’ve learned how to answer: '{question.strip()}'"
+            log_chat(user_msg, resp)
+            return resp
+        except Exception as e:
+            resp = "⚠️ Teaching failed. Use: teach: question=answer"
+            log_chat(user_msg, resp)
+            return resp
 
-    # --- if ML model exists, try predicting intent ---
+    # 3) ML model if present
     if model and vectorizer:
         try:
             X = vectorizer.transform([user_msg])
-            intent = model.predict(X)[0]
-
-            # special handling
-            if intent == "time":
-                return f"⏰ Current time: {datetime.now().strftime('%H:%M:%S')}"
-            if intent == "date":
-                return f"📅 Today is {datetime.now().strftime('%A, %B %d, %Y')}"
-            if intent == "ask_name":
-                name = extract_name(user_msg)
-                if name:
-                    return f"Nice to meet you, {name}! 😊"
-                return "I’d love to know your name!"
-
+            tag = model.predict(X)[0]
             for intent_obj in intents["intents"]:
-                if intent_obj["tag"] == intent:
-                    return random.choice(intent_obj["responses"])
+                if intent_obj["tag"] == tag:
+                    reply = random.choice(intent_obj["responses"])
+                    log_chat(user_msg, reply)
+                    return reply
         except Exception as e:
-            print("[ERROR in model prediction]", str(e), flush=True)
+            print("[MODEL ERROR]", e, flush=True)
 
-    # --- fallback keyword rules ---
-    if "time" in user_msg_lower:
-        return f"⏰ Current time: {datetime.now().strftime('%H:%M:%S')}"
-    if "date" in user_msg_lower or "day" in user_msg_lower:
-        return f"📅 Today is {datetime.now().strftime('%A, %B %d, %Y')}"
-    if "who are you" in user_msg_lower or "your name" in user_msg_lower:
-        return "I'm your virtual assistant bot 🤖"
-    if "bye" in user_msg_lower or "goodbye" in user_msg_lower:
-        return "Goodbye! 👋 Have a nice day!"
+    # 4) fallback keyword handling
+    u = user_msg.lower()
+    if "hi" in u or "hello" in u:
+        resp = "Hello! 👋 How can I help you today?"
+        log_chat(user_msg, resp)
+        return resp
+    if "who are you" in u or "your name" in u:
+        resp = "I'm your virtual assistant bot 🤖"
+        log_chat(user_msg, resp)
+        return resp
+    if "time" in u:
+        from datetime import datetime
+        resp = "⏰ Current time: " + datetime.now().strftime("%H:%M:%S")
+        log_chat(user_msg, resp)
+        return resp
 
-    # --- final fallback ---
-    return random.choice([
-        "Sorry, I didn’t quite get that 🤔",
-        "Can you rephrase your question?"
-    ])
+    resp = random.choice(["Sorry, I didn’t quite get that 🤔", "Can you rephrase your question?"])
+    log_chat(user_msg, resp)
+    return resp
 
-
-# ===============================
-# 📌 HELPERS
-# ===============================
-def extract_name(text):
-    patterns = [
-        r"my name is (\w+)",
-        r"i am (\w+)",
-        r"i'm (\w+)",
-        r"call me (\w+)"
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text.lower())
-        if match:
-            return match.group(1).capitalize()
-    return None
-
-
-# ===============================
-# 📌 ROUTES
-# ===============================
+# -------------------------
+# Routes
+# -------------------------
 @app.route("/")
 def home():
     return render_template("index.html")
 
-
 @app.route("/get", methods=["POST"])
 def get_bot_response():
-    try:
-        data = request.get_json()
-        user_msg = data.get("message", "")
-        reply = chatbot_response(user_msg)
+    data = request.get_json() or {}
+    user_msg = data.get("message", "")
+    reply = chatbot_response(user_msg)
+    return jsonify({"reply": reply})
 
-        # log conversation to MySQL
-        log_conversation(user_msg, reply)
+# Login routes
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+            session["admin"] = True
+            return redirect(url_for("admin"))
+        else:
+            return render_template("login.html", error="Invalid credentials")
+    return render_template("login.html")
 
-        return jsonify({"reply": reply})
-    except Exception as e:
-        print("[FATAL ERROR]", str(e), flush=True)
-        return jsonify({"error": str(e)}), 500
+@app.route("/logout")
+@login_required
+def logout():
+    session.pop("admin", None)
+    return redirect(url_for("login"))
 
+# Admin dashboard - protected
+@app.route("/admin")
+@login_required
+def admin():
+    logs = fetch_recent_chats(50)
+    knowledge = fetch_knowledge()
+    return render_template("admin.html", logs=logs, knowledge=knowledge)
 
+@app.route("/delete_knowledge/<int:k_id>", methods=["POST"])
+@login_required
+def delete_knowledge(k_id):
+    delete_knowledge_entry(k_id)
+    return redirect(url_for("admin"))
+
+# -------------------------
+# Run
+# -------------------------
 if __name__ == "__main__":
+    # For local dev use; in production use gunicorn etc.
     app.run(debug=True)

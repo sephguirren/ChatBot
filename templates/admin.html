@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h1 { color: #333; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }
+    th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+    th { background: #f4f4f4; }
+    a { color: red; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <h1>📊 Admin Dashboard</h1>
+  <a href="{{ url_for('logout') }}" style="padding:8px 12px; background:red; color:white; border-radius:5px; text-decoration:none;">Logout</a>
+
+  <h2>Recent Chats</h2>
+  <table>
+    <tr>
+      <th>ID</th>
+      <th>User Message</th>
+      <th>Bot Response</th>
+      <th>Time</th>
+    </tr>
+    {% for log in logs %}
+    <tr>
+      <td>{{ log[0] }}</td>
+      <td>{{ log[1] }}</td>
+      <td>{{ log[2] }}</td>
+      <td>{{ log[3] }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h2>Knowledge Base</h2>
+  <table>
+    <tr>
+      <th>ID</th>
+      <th>Question</th>
+      <th>Answer</th>
+      <th>Action</th>
+    </tr>
+    {% for item in knowledge %}
+    <tr>
+      <td>{{ item[0] }}</td>
+      <td>{{ item[1] }}</td>
+      <td>{{ item[2] }}</td>
+      <td><a href="/delete_knowledge/{{ item[0] }}">Delete</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</body>
+</html>
