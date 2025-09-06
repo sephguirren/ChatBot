@@ -1,0 +1,67 @@
+{
+  "intents": [
+    {
+      "tag": "greeting",
+      "patterns": ["Hi", "Hello", "Hey", "Good morning", "Good evening"],
+      "responses": ["Hello! How can I help you today?", "Hi there, what can I do for you?"]
+    },
+    {
+      "tag": "goodbye",
+      "patterns": ["Bye", "See you", "Goodbye", "Talk later"],
+      "responses": ["Goodbye! Have a nice day!", "See you soon!"]
+    },
+    {
+      "tag": "thanks",
+      "patterns": ["Thanks", "Thank you", "Appreciate it"],
+      "responses": ["You're welcome!", "Happy to help!"]
+    },
+    {
+      "tag": "name",
+      "patterns": ["What is your name?", "Who are you?", "Tell me your name"],
+      "responses": ["I'm your virtual assistant bot 🤖", "I’m a chatbot trained to help you."]
+    },
+    {
+      "tag": "time",
+      "patterns": ["What time is it?", "Tell me the time", "Current time please"],
+      "responses": ["The time feature is enabled ⏰."]
+    },
+    {
+      "tag": "date",
+      "patterns": ["What day is it today?", "Tell me the date", "Current date please"],
+      "responses": ["The date feature is enabled 📅."]
+    },
+    {
+      "tag": "joke",
+      "patterns": ["Tell me a joke", "Make me laugh", "Do you know a joke?"],
+      "responses": [
+        "Why don’t skeletons fight each other? They don’t have the guts 😂",
+        "I told my computer I needed a break, and it said 'No problem — I’ll go to sleep.' 💻"
+      ]
+    },
+    {
+      "tag": "products",
+      "patterns": ["What products do you have?", "Show me your items", "What are you selling?"],
+      "responses": ["We sell clothes, shoes, and accessories. Would you like to see the latest arrivals?"]
+    },
+    {
+      "tag": "delivery",
+      "patterns": ["Do you deliver?", "How long is shipping?", "Is delivery free?"],
+      "responses": ["Yes! Standard delivery takes 3–5 days. Free shipping for orders over $50."]
+    },
+    {
+      "tag": "payment",
+      "patterns": ["How can I pay?", "Do you accept PayPal?", "What payment options are there?"],
+      "responses": ["We accept credit cards, PayPal, and cash on delivery."]
+    },
+    {
+      "tag": "ask_name",
+      "patterns": ["My name is Mark", "I am John", "Call me Sarah", "I'm Alex"],
+      "responses": ["Nice to meet you, {name}!", "Got it, I'll call you {name}."]
+    },
+    {
+      "tag": "fallback",
+      "patterns": [],
+      "responses": ["Sorry, I didn’t quite get that 🤔", "Can you rephrase your question?"]
+    }
+  ]
+}

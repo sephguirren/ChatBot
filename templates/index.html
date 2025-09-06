@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Chat Bot</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="chat-container">
+    <!-- Header -->
+    <div class="chat-header">
+      <div class="chat-logo">🤖</div>
+      <div class="chat-title">Chat Bot</div>
+      <div class="chat-menu">☰</div>
+    </div>
+
+    <!-- Messages -->
+    <div id="chatbox" class="chatbox">
+      <div class="bot-message">What can I help with?</div>
+    </div>
+
+    <!-- Input -->
+    <div class="chat-input">
+      <button class="add-btn">＋</button>
+      <input id="input" type="text" placeholder="Ask anything" />
+      <button class="send-btn" onclick="sendMessage()">➤</button>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
